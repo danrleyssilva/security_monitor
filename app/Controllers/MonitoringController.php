@@ -21,16 +21,29 @@ final class MonitoringController
             $repository = new MonitoringRepository(Database::connect());
             $monitor = new NetworkMonitor();
             $failureCounts = $repository->getFailureCounts();
+            $nvrs = $repository->getNvrs();
+            $camerasByNvr = [];
+            $ips = [];
 
-            foreach ($repository->getNvrs() as $nvr) {
+            foreach ($nvrs as $nvr) {
                 $cameras = $repository->getCamerasByNvr($nvr['id']);
+                $camerasByNvr[(string) $nvr['id']] = $cameras;
+                $ips[] = trim((string) $nvr['ip']);
+                foreach ($cameras as $camera) {
+                    $ips[] = trim((string) $camera['ip']);
+                }
+            }
+            $pingResults = $monitor->checkMany($ips);
+
+            foreach ($nvrs as $nvr) {
+                $cameras = $camerasByNvr[(string) $nvr['id']];
                 $offlineCameras = [];
                 $activeCameras = 0;
 
                 foreach ($cameras as $camera) {
                     $ip = trim((string) $camera['ip']);
                     $cameraKey = $nvr['id'] . '|' . $ip;
-                    if ($monitor->respondsToPing($ip)) {
+                    if ($pingResults[$ip] ?? false) {
                         $repository->clearFailure($cameraKey);
                         $activeCameras++;
                         continue;
@@ -54,7 +67,7 @@ final class MonitoringController
                     'id' => $nvr['id'],
                     'name' => $nvr['name'] ?: 'NVR #' . $nvr['id'],
                     'ip' => $nvr['ip'],
-                    'online' => $monitor->respondsToPing(trim((string) $nvr['ip'])),
+                    'online' => $pingResults[trim((string) $nvr['ip'])] ?? false,
                     'active' => $activeCameras,
                     'total' => count($cameras),
                     'offline' => $offlineCameras,
