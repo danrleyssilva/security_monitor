@@ -6,8 +6,10 @@ namespace App\Services;
 
 final class NetworkMonitor
 {
-    private const MAX_CONCURRENT_PINGS = 40;
-    private const PROCESS_TIMEOUT_SECONDS = 2.0;
+    // Muitos pings simultâneos podem causar descarte de ICMP em NVRs/switches.
+    // 12 mantém a página rápida sem sobrecarregar os equipamentos.
+    private const MAX_CONCURRENT_PINGS = 12;
+    private const PROCESS_TIMEOUT_SECONDS = 3.0;
 
     /** @var array<string, bool> */
     private array $results = [];
@@ -34,6 +36,25 @@ final class NetworkMonitor
             return $this->results;
         }
 
+        $this->runPings($pending);
+
+        // Uma segunda tentativa só para as falhas evita falso negativo por
+        // perda transitória de pacote ou por limitação de ICMP no equipamento.
+        $retry = array_values(array_filter(
+            $pending,
+            fn(string $ip): bool => !($this->results[$ip] ?? false)
+        ));
+        if ($retry) {
+            usleep(200_000);
+            $this->runPings($retry);
+        }
+
+        return $this->results;
+    }
+
+    /** @param list<string> $pending */
+    private function runPings(array $pending): void
+    {
         $isWindows = strtoupper(substr(PHP_OS, 0, 3)) === 'WIN';
         $running = [];
 
@@ -84,6 +105,5 @@ final class NetworkMonitor
             }
         }
 
-        return $this->results;
     }
 }
